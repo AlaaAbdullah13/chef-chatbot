@@ -1,10 +1,14 @@
+import os
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
-from langchain_ollama import ChatOllama
+from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from dotenv import load_dotenv
 import base64
+
+load_dotenv()
 
 app = FastAPI(title="AI Chef Assistant 👨‍🍳")
 
@@ -14,6 +18,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ---------------------------------------------------------------------------
+# Groq Cloud API Key  (free at https://console.groq.com)
+# Set in .env file or as environment variable
+# ---------------------------------------------------------------------------
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
 # ---------------------------------------------------------------------------
 # Chef System Prompt
@@ -84,11 +94,11 @@ async def chat_with_chef(req: ChatRequest):
     # Clamp creativity between 0 and 1
     temperature = max(0.0, min(1.0, req.creativity))
 
-    # Create the LLM with the requested creativity
-    llm = ChatOllama(
-        model="llama3",
+    # Create the LLM with the requested creativity — using Groq Cloud (llama3)
+    llm = ChatGroq(
+        model="llama-3.3-70b-versatile",
         temperature=temperature,
-        base_url="http://localhost:11434",
+        api_key=GROQ_API_KEY,
     )
 
     # Build conversation history
@@ -119,34 +129,32 @@ async def chat_with_image(
     """Chat endpoint that also accepts an image upload."""
     temperature = max(0.0, min(1.0, creativity))
 
-    llm = ChatOllama(
-        model="llama3",
+    llm = ChatGroq(
+        model="llama-3.3-70b-versatile",
         temperature=temperature,
-        base_url="http://localhost:11434",
+        api_key=GROQ_API_KEY,
     )
 
     history = get_conversation(session_id)
 
-    # Build content parts
-    content_parts = message
+    # Build content — Groq's llama3 is text-only, so describe the image scenario
+    text_content = message
     if image:
         image_data = await image.read()
         image_base64 = base64.b64encode(image_data).decode("utf-8")
-        content_parts = [
-            {"type": "text", "text": message},
-            {
-                "type": "image_url",
-                "image_url": f"data:image/jpeg;base64,{image_base64}",
-            },
-        ]
+        text_content = (
+            f"{message}\n\n[The user uploaded a food image. "
+            f"Please acknowledge it and ask them to describe what they see, "
+            f"or suggest dishes based on common ingredients they might have.]"
+        )
 
     messages = [SystemMessage(content=CHEF_SYSTEM_PROMPT)]
     messages.extend(history)
-    messages.append(HumanMessage(content=content_parts))
+    messages.append(HumanMessage(content=text_content))
 
     response = llm.invoke(messages)
 
-    # Store text-only version in history for context
+    # Store in conversation memory
     history.append(HumanMessage(content=message))
     history.append(AIMessage(content=response.content))
 

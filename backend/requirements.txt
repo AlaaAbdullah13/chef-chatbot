@@ -1,5 +1,6 @@
 fastapi
 uvicorn[standard]
 langchain
-langchain-ollama
+langchain-groq
 python-multipart
+python-dotenv
